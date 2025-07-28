@@ -1,0 +1,103 @@
+import os
+import shutil
+import re
+from cryptography import x509
+from cryptography.hazmat.backends import default_backend
+import customtkinter as ctk
+
+ctk.set_appearance_mode("System")  # Автоматическая тема (светлая/тёмная)
+ctk.set_default_color_theme("blue")  # Цветовая тема
+
+def extract_cert_info(filepath):
+    try:
+        with open(filepath, "rb") as f:
+            data = f.read()
+        try:
+            cert = x509.load_pem_x509_certificate(data, default_backend())
+        except ValueError:
+            cert = x509.load_der_x509_certificate(data, default_backend())
+
+        subject = cert.subject.get_attributes_for_oid(x509.NameOID.COMMON_NAME)
+        owner = subject[0].value if subject else "UnknownOwner"
+
+        not_before = cert.not_valid_before.strftime("%Y%m%d")
+        not_after = cert.not_valid_after.strftime("%Y%m%d")
+
+        owner_clean = re.sub(r'[^A-Za-z0-9_-]', '', owner)
+        return owner_clean, not_before, not_after
+    except Exception as e:
+        print(f"Ошибка при извлечении сертификата из {filepath}: {e}")
+        return None, None, None
+
+def browse_file():
+    filepath = ctk.filedialog.askopenfilename(title="Выберите файл")
+    if filepath:
+        source_var.set(filepath)
+
+def browse_folder():
+    folder = ctk.filedialog.askdirectory(title="Выберите папку назначения")
+    if folder:
+        destination_var.set(folder)
+
+def move_and_rename_file():
+    src = source_var.get()
+    dst = destination_var.get()
+    prefix = prefix_var.get().strip()
+
+    if not os.path.isfile(src):
+        ctk.messagebox.show_error("Ошибка", "Выберите корректный файл")
+        return
+    if not os.path.isdir(dst):
+        ctk.messagebox.show_error("Ошибка", "Укажите корректную папку назначения")
+        return
+
+    try:
+        os.makedirs(dst, exist_ok=True)
+        ext = os.path.splitext(src)[1]
+
+        owner, not_before, not_after = extract_cert_info(src)
+        if owner and not_before and not_after:
+            parts = []
+            if prefix:
+                parts.append(prefix)
+            parts.append(owner)
+            parts.append(f"{not_before}-{not_after}")
+            new_name = "_".join(parts) + ext
+        else:
+            new_name = (prefix if prefix else "file") + ext
+
+        dst_path = os.path.join(dst, new_name)
+        shutil.move(src, dst_path)
+        print(f"Moved and renamed: {src} -> {new_name}")
+
+        ctk.messagebox.show_info("Успех", f"Файл перемещён и переименован:\n{new_name}")
+    except Exception as e:
+        ctk.messagebox.show_error("Ошибка", f"Не удалось выполнить операцию:\n{e}")
+
+# Создание окна
+app = ctk.CTk()
+app.title("Переименование файла с данными сертификата")
+app.geometry("600x300")
+
+source_var = ctk.StringVar()
+destination_var = ctk.StringVar()
+prefix_var = ctk.StringVar()
+
+# Интерфейс
+ctk.CTkLabel(app, text="Исходный файл:").grid(row=0, column=0, padx=15, pady=15, sticky="e")
+ctk.CTkEntry(app, textvariable=source_var, width=400).grid(row=0, column=1, padx=15)
+ctk.CTkButton(app, text="Выбрать файл", command=browse_file).grid(row=0, column=2, padx=15)
+
+ctk.CTkLabel(app, text="Папка назначения:").grid(row=1, column=0, padx=15, pady=15, sticky="e")
+ctk.CTkEntry(app, textvariable=destination_var, width=400).grid(row=1, column=1, padx=15)
+ctk.CTkButton(app, text="Выбрать папку", command=browse_folder).grid(row=1, column=2, padx=15)
+
+ctk.CTkLabel(app, text="Префикс для имени:").grid(row=2, column=0, padx=15, pady=15, sticky="e")
+ctk.CTkEntry(app, textvariable=prefix_var, width=400).grid(row=2, column=1, padx=15)
+
+ctk.CTkButton(app, text="Переместить и переименовать", command=move_and_rename_file, width=250).grid(row=3, column=1, pady=20)
+
+app.grid_columnconfigure(1, weight=1)
+
+app.mainloop()
+
